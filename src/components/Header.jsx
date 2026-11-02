@@ -40,18 +40,28 @@ export default function Header({ currentTab, setCurrentTab }) {
           <div className="flex items-center gap-2">
             {cloudStatus === 'synced' ? (
               <span
-                className="hidden sm:flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200"
+                className="flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200"
                 title="Real-time Cloud Sync active via Firebase Firestore"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Cloud Synced
+                Live Cloud Sync
               </span>
+            ) : cloudStatus === 'error' ? (
+              <a
+                href="https://console.firebase.google.com/project/highonyou/firestore"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-[11px] font-medium text-amber-800 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200 hover:bg-amber-100 transition"
+                title="Click to enable Firestore in your Firebase Console"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                Local Mode (Enable Firestore)
+              </a>
             ) : (
               <span
-                className="hidden sm:flex items-center gap-1 text-[11px] font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200"
-                title="Saving to local browser storage"
+                className="flex items-center gap-1 text-[11px] font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200"
               >
-                Local Mode
+                Connecting...
               </span>
             )}
 

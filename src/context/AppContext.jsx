@@ -70,73 +70,83 @@ export const AppProvider = ({ children }) => {
     return saved ? JSON.parse(saved) : INITIAL_DIET_LOGS;
   });
 
-  // Cloud Sync Status: 'synced' | 'connecting' | 'local'
+  // Cloud Sync Status: 'synced' | 'connecting' | 'error' | 'local'
   const [cloudStatus, setCloudStatus] = useState('connecting');
-  const isSyncingRef = useRef(false);
+  const [firestoreError, setFirestoreError] = useState(null);
 
-  // Real-time Firestore Synchronization
+  // Real-time Firestore Synchronization for both athletes
   useEffect(() => {
     if (!db) {
       setCloudStatus('local');
       return;
     }
 
-    try {
-      const docRef = doc(db, 'fitness_tracker', 'duo_data');
-      const unsubscribe = onSnapshot(
-        docRef,
-        (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.data();
-            // Only update if not currently pushing local changes
-            if (!isSyncingRef.current) {
-              if (data.profiles && Array.isArray(data.profiles)) setProfiles(data.profiles);
-              if (data.gymLogs) setGymLogs(data.gymLogs);
-              if (data.stravaRuns) setStravaRuns(data.stravaRuns);
-              if (data.dietLogs) setDietLogs(data.dietLogs);
-            }
-            setCloudStatus('synced');
-          } else {
-            // First time initialization in Firestore
-            setDoc(docRef, {
-              profiles,
-              gymLogs,
-              stravaRuns,
-              dietLogs,
-              lastUpdated: new Date().toISOString()
-            }, { merge: true })
-              .then(() => setCloudStatus('synced'))
-              .catch(() => setCloudStatus('local'));
-          }
-        },
-        (error) => {
-          console.debug('Firestore live sync error (falling back to local storage):', error.message);
-          setCloudStatus('local');
-        }
-      );
+    const unsubs = [];
 
-      return () => unsubscribe();
-    } catch (err) {
-      console.debug('Firestore setup exception:', err);
-      setCloudStatus('local');
-    }
+    ['user_1', 'user_2'].forEach((uid) => {
+      try {
+        const userDocRef = doc(db, 'athletes', uid);
+        const unsub = onSnapshot(
+          userDocRef,
+          (snap) => {
+            if (snap.exists()) {
+              const data = snap.data();
+              if (data.gymLogs && Array.isArray(data.gymLogs)) {
+                setGymLogs((prev) => ({ ...prev, [uid]: data.gymLogs }));
+              }
+              if (data.stravaRuns && Array.isArray(data.stravaRuns)) {
+                setStravaRuns((prev) => ({ ...prev, [uid]: data.stravaRuns }));
+              }
+              if (data.dietLogs) {
+                setDietLogs((prev) => ({ ...prev, [uid]: data.dietLogs }));
+              }
+              if (data.name) {
+                setProfiles((prev) =>
+                  prev.map((p) => (p.id === uid ? { ...p, name: data.name } : p))
+                );
+              }
+              setCloudStatus('synced');
+              setFirestoreError(null);
+            }
+          },
+          (error) => {
+            console.debug(`Firestore sync error for ${uid}:`, error.message);
+            setCloudStatus('error');
+            setFirestoreError(error.message || 'Permission denied or Firestore disabled');
+          }
+        );
+        unsubs.push(unsub);
+      } catch (err) {
+        console.debug('Firestore setup exception:', err);
+        setCloudStatus('error');
+        setFirestoreError(err.message);
+      }
+    });
+
+    return () => unsubs.forEach((u) => u && u());
   }, []);
 
-  // Helper to push updates to Firestore
-  const pushToFirestore = async (updates) => {
+  // Helper to push a specific user's updates to Firestore
+  const pushUserToFirestore = async (userId, updates) => {
     if (!db) return;
     try {
-      isSyncingRef.current = true;
-      const docRef = doc(db, 'fitness_tracker', 'duo_data');
-      await setDoc(docRef, { ...updates, lastUpdated: new Date().toISOString() }, { merge: true });
+      const userDocRef = doc(db, 'athletes', userId);
+      await setDoc(
+        userDocRef,
+        {
+          id: userId,
+          name: profiles.find((p) => p.id === userId)?.name || (userId === 'user_1' ? 'Rohit' : 'Vybhavi'),
+          ...updates,
+          updatedAt: new Date().toISOString()
+        },
+        { merge: true }
+      );
       setCloudStatus('synced');
+      setFirestoreError(null);
     } catch (e) {
-      console.debug('Firestore write failed (data safe in localStorage):', e);
-      setCloudStatus('local');
-    } finally {
-      setTimeout(() => {
-        isSyncingRef.current = false;
-      }, 500);
+      console.debug('Firestore write failed:', e);
+      setCloudStatus('error');
+      setFirestoreError(e.message || 'Firestore write error');
     }
   };
 
@@ -225,12 +235,12 @@ export const AppProvider = ({ children }) => {
     };
 
     setGymLogs((prev) => {
-      const updated = {
+      const userList = [newExercise, ...(prev[activeProfileId] || [])];
+      pushUserToFirestore(activeProfileId, { gymLogs: userList });
+      return {
         ...prev,
-        [activeProfileId]: [newExercise, ...(prev[activeProfileId] || [])]
+        [activeProfileId]: userList
       };
-      pushToFirestore({ gymLogs: updated });
-      return updated;
     });
     return newExercise;
   };
@@ -269,12 +279,11 @@ export const AppProvider = ({ children }) => {
         return item;
       });
 
-      const nextState = {
+      pushUserToFirestore(activeProfileId, { gymLogs: updated });
+      return {
         ...prev,
         [activeProfileId]: updated
       };
-      pushToFirestore({ gymLogs: nextState });
-      return nextState;
     });
   };
 
@@ -285,7 +294,7 @@ export const AppProvider = ({ children }) => {
 
       currentList.forEach((item) => {
         if (item.id === exerciseId) {
-          return; // removed direct item
+          return;
         }
         if (item.exercises && Array.isArray(item.exercises)) {
           const remaining = item.exercises.filter((ex) => ex.id !== exerciseId);
@@ -297,12 +306,11 @@ export const AppProvider = ({ children }) => {
         }
       });
 
-      const nextState = {
+      pushUserToFirestore(activeProfileId, { gymLogs: updated });
+      return {
         ...prev,
         [activeProfileId]: updated
       };
-      pushToFirestore({ gymLogs: nextState });
-      return nextState;
     });
   };
 
@@ -388,45 +396,45 @@ export const AppProvider = ({ children }) => {
     };
 
     setStravaRuns((prev) => {
-      const updated = {
+      const userRuns = [newRun, ...(prev[activeProfileId] || [])];
+      pushUserToFirestore(activeProfileId, { stravaRuns: userRuns });
+      return {
         ...prev,
-        [activeProfileId]: [newRun, ...(prev[activeProfileId] || [])]
+        [activeProfileId]: userRuns
       };
-      pushToFirestore({ stravaRuns: updated });
-      return updated;
     });
     return newRun;
   };
 
   const deleteStravaRun = (runId) => {
     setStravaRuns((prev) => {
-      const updated = {
+      const userRuns = (prev[activeProfileId] || []).filter((r) => r.id !== runId);
+      pushUserToFirestore(activeProfileId, { stravaRuns: userRuns });
+      return {
         ...prev,
-        [activeProfileId]: (prev[activeProfileId] || []).filter((r) => r.id !== runId)
+        [activeProfileId]: userRuns
       };
-      pushToFirestore({ stravaRuns: updated });
-      return updated;
     });
   };
 
   const giveKudos = (runId, targetUserId = activeProfileId) => {
     setStravaRuns((prev) => {
-      const updated = {
+      const userRuns = (prev[targetUserId] || []).map((r) => {
+        if (r.id === runId) {
+          const currentlyLiked = r.hasGivenKudos;
+          return {
+            ...r,
+            kudos: currentlyLiked ? r.kudos - 1 : r.kudos + 1,
+            hasGivenKudos: !currentlyLiked
+          };
+        }
+        return r;
+      });
+      pushUserToFirestore(targetUserId, { stravaRuns: userRuns });
+      return {
         ...prev,
-        [targetUserId]: (prev[targetUserId] || []).map((r) => {
-          if (r.id === runId) {
-            const currentlyLiked = r.hasGivenKudos;
-            return {
-              ...r,
-              kudos: currentlyLiked ? r.kudos - 1 : r.kudos + 1,
-              hasGivenKudos: !currentlyLiked
-            };
-          }
-          return r;
-        })
+        [targetUserId]: userRuns
       };
-      pushToFirestore({ stravaRuns: updated });
-      return updated;
     });
   };
 
@@ -480,18 +488,20 @@ export const AppProvider = ({ children }) => {
         return meal;
       });
 
-      const nextState = {
-        ...prev,
-        [activeProfileId]: {
-          ...userDiets,
-          [date]: {
-            ...currentDay,
-            meals: updatedMeals
-          }
+      const updatedUserDiets = {
+        ...userDiets,
+        [date]: {
+          ...currentDay,
+          meals: updatedMeals
         }
       };
-      pushToFirestore({ dietLogs: nextState });
-      return nextState;
+
+      pushUserToFirestore(activeProfileId, { dietLogs: updatedUserDiets });
+
+      return {
+        ...prev,
+        [activeProfileId]: updatedUserDiets
+      };
     });
   };
 
@@ -511,18 +521,20 @@ export const AppProvider = ({ children }) => {
         return meal;
       });
 
-      const nextState = {
-        ...prev,
-        [activeProfileId]: {
-          ...userDiets,
-          [date]: {
-            ...currentDay,
-            meals: updatedMeals
-          }
+      const updatedUserDiets = {
+        ...userDiets,
+        [date]: {
+          ...currentDay,
+          meals: updatedMeals
         }
       };
-      pushToFirestore({ dietLogs: nextState });
-      return nextState;
+
+      pushUserToFirestore(activeProfileId, { dietLogs: updatedUserDiets });
+
+      return {
+        ...prev,
+        [activeProfileId]: updatedUserDiets
+      };
     });
   };
 
@@ -541,18 +553,20 @@ export const AppProvider = ({ children }) => {
 
       const newCount = Math.max(0, (currentDay.waterGlasses || 0) + delta);
 
-      const nextState = {
-        ...prev,
-        [activeProfileId]: {
-          ...userDiets,
-          [date]: {
-            ...currentDay,
-            waterGlasses: newCount
-          }
+      const updatedUserDiets = {
+        ...userDiets,
+        [date]: {
+          ...currentDay,
+          waterGlasses: newCount
         }
       };
-      pushToFirestore({ dietLogs: nextState });
-      return nextState;
+
+      pushUserToFirestore(activeProfileId, { dietLogs: updatedUserDiets });
+
+      return {
+        ...prev,
+        [activeProfileId]: updatedUserDiets
+      };
     });
   };
 
@@ -579,12 +593,6 @@ export const AppProvider = ({ children }) => {
     if (imported.gymLogs) setGymLogs(imported.gymLogs);
     if (imported.stravaRuns) setStravaRuns(imported.stravaRuns);
     if (imported.dietLogs) setDietLogs(imported.dietLogs);
-    pushToFirestore({
-      profiles: imported.profiles || profiles,
-      gymLogs: imported.gymLogs || gymLogs,
-      stravaRuns: imported.stravaRuns || stravaRuns,
-      dietLogs: imported.dietLogs || dietLogs
-    });
   };
 
   const clearAllData = () => {
@@ -596,11 +604,8 @@ export const AppProvider = ({ children }) => {
       localStorage.setItem(STORAGE_KEYS.STRAVA_RUNS, JSON.stringify({ user_1: [], user_2: [] }));
       localStorage.setItem(STORAGE_KEYS.DIET_LOGS, JSON.stringify({ user_1: {}, user_2: {} }));
     } catch (e) {}
-    pushToFirestore({
-      gymLogs: { user_1: [], user_2: [] },
-      stravaRuns: { user_1: [], user_2: [] },
-      dietLogs: { user_1: {}, user_2: {} }
-    });
+    pushUserToFirestore('user_1', { gymLogs: [], stravaRuns: [], dietLogs: {} });
+    pushUserToFirestore('user_2', { gymLogs: [], stravaRuns: [], dietLogs: {} });
   };
 
   const resetToSampleData = clearAllData;
@@ -644,7 +649,8 @@ export const AppProvider = ({ children }) => {
         resetToSampleData,
         clearAllData,
         // Cloud Status
-        cloudStatus
+        cloudStatus,
+        firestoreError
       }}
     >
       {children}
