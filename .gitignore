@@ -23,6 +23,8 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Editor & OS files
+test-*.mjs
+test-*.js
 .vscode/*
 !.vscode/extensions.json
 .idea/
