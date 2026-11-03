@@ -6,7 +6,7 @@ import {
   INITIAL_DIET_LOGS
 } from '../data/initialData';
 import { db } from '../firebase';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, onSnapshot, getDoc } from 'firebase/firestore';
 
 const AppContext = createContext();
 
@@ -229,9 +229,12 @@ export const AppProvider = ({ children }) => {
 
     const newExercise = {
       id: `ex_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      athleteId: activeProfileId,
+      athleteName: activeProfile.name,
       date: date || selectedDate,
       exerciseName: exerciseName.trim(),
-      sets: cleanSets
+      sets: cleanSets,
+      createdAt: new Date().toISOString()
     };
 
     setGymLogs((prev) => {
@@ -242,6 +245,11 @@ export const AppProvider = ({ children }) => {
         [activeProfileId]: userList
       };
     });
+
+    if (db) {
+      setDoc(doc(db, 'gym_exercises', newExercise.id), newExercise).catch(() => {});
+    }
+
     return newExercise;
   };
 
@@ -285,6 +293,15 @@ export const AppProvider = ({ children }) => {
         [activeProfileId]: updated
       };
     });
+
+    if (db) {
+      setDoc(doc(db, 'gym_exercises', exerciseId), {
+        exerciseName: exerciseName.trim(),
+        date: date || selectedDate,
+        sets: cleanSets,
+        updatedAt: new Date().toISOString()
+      }, { merge: true }).catch(() => {});
+    }
   };
 
   const deleteExercise = (exerciseId) => {
@@ -312,6 +329,10 @@ export const AppProvider = ({ children }) => {
         [activeProfileId]: updated
       };
     });
+
+    if (db) {
+      deleteDoc(doc(db, 'gym_exercises', exerciseId)).catch(() => {});
+    }
   };
 
   // Backwards compatibility alias
@@ -610,6 +631,22 @@ export const AppProvider = ({ children }) => {
 
   const resetToSampleData = clearAllData;
 
+  const testCloudConnection = async () => {
+    if (!db) return { success: false, error: 'Firebase is not initialized' };
+    try {
+      const pingDoc = doc(db, 'system', 'connection_test');
+      await setDoc(pingDoc, { ping: true, testedAt: new Date().toISOString() });
+      setCloudStatus('synced');
+      setFirestoreError(null);
+      return { success: true };
+    } catch (err) {
+      console.warn('Test connection error:', err);
+      setCloudStatus('error');
+      setFirestoreError(err.message);
+      return { success: false, error: err.message };
+    }
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -650,7 +687,8 @@ export const AppProvider = ({ children }) => {
         clearAllData,
         // Cloud Status
         cloudStatus,
-        firestoreError
+        firestoreError,
+        testCloudConnection
       }}
     >
       {children}
