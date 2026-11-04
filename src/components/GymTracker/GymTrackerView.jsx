@@ -35,8 +35,17 @@ export default function GymTrackerView() {
   const [search, setSearch] = useState('');
   const [savedFeedback, setSavedFeedback] = useState('');
   const [editingItem, setEditingItem] = useState(null);
+  const [viewScope, setViewScope] = useState('day'); // 'day' (default) or 'all'
 
   const logs = getActiveUserGymLogs();
+
+  const currentDate = logDate || selectedDate;
+  const dayLogs = logs.filter((l) => l.date === currentDate);
+  const scopedLogs = viewScope === 'day' ? dayLogs : logs;
+
+  const filteredLogs = scopedLogs.filter((l) =>
+    l.exerciseName.toLowerCase().includes(search.toLowerCase())
+  );
 
   const handleAddSet = () => {
     const last = sets[sets.length - 1];
@@ -96,10 +105,6 @@ export default function GymTrackerView() {
       { setNumber: 3, weight: '', reps: '' }
     ]);
   };
-
-  const filteredLogs = logs.filter((l) =>
-    l.exerciseName.toLowerCase().includes(search.toLowerCase())
-  );
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto pb-12">
@@ -244,26 +249,70 @@ export default function GymTrackerView() {
 
       {/* LOGGED EXERCISES LIST */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-sm text-gray-900">
-            Past Exercises ({filteredLogs.length})
-          </h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h3 className="font-bold text-sm text-gray-900">
+              {viewScope === 'day'
+                ? `Exercises for ${currentDate}`
+                : 'All Past Exercises'}
+            </h3>
+            <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full font-medium">
+              {filteredLogs.length}
+            </span>
+          </div>
 
-          <div className="relative w-48">
-            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter..."
-              className="w-full bg-white border border-gray-200 rounded-lg pl-8 pr-2 py-1 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-gray-400"
-            />
+          <div className="flex items-center gap-2">
+            {/* Scope Toggle: Default to 'day' */}
+            <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewScope('day')}
+                className={`px-2.5 py-1 rounded-md font-medium transition ${
+                  viewScope === 'day'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                This Day ({dayLogs.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewScope('all')}
+                className={`px-2.5 py-1 rounded-md font-medium transition ${
+                  viewScope === 'all'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                All Dates ({logs.length})
+              </button>
+            </div>
+
+            <div className="relative w-36 sm:w-44">
+              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Filter..."
+                className="w-full bg-white border border-gray-200 rounded-lg pl-8 pr-2 py-1 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-gray-400"
+              />
+            </div>
           </div>
         </div>
 
         {filteredLogs.length === 0 ? (
-          <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-xs text-gray-400">
-            No exercises logged yet.
+          <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-xs text-gray-400 space-y-1">
+            <p className="font-medium text-gray-600">
+              {viewScope === 'day'
+                ? `No exercises logged for ${currentDate}.`
+                : 'No exercises found.'}
+            </p>
+            <p className="text-[11px] text-gray-400">
+              {viewScope === 'day'
+                ? 'Fill in the form above to log exercises for this day.'
+                : 'Start logging workouts above to see your history.'}
+            </p>
           </div>
         ) : (
           <div className="space-y-2">
